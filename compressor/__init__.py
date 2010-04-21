@@ -69,6 +69,12 @@ class Compressor(object):
         raise NotImplementedError('split_contents must be defined in a subclass')
 
     def get_filename(self, url):
+        from django.conf import settings as proj_settings
+        if "staticmedia" in proj_settings.INSTALLED_APPS:
+            import staticmedia
+            for prefix, path in staticmedia.get_mount_points():
+                if url.startswith(prefix):
+                    return staticmedia.path(url.replace(prefix, ''))
         if not url.startswith(settings.MEDIA_URL):
             raise UncompressableFileError('"%s" is not in COMPRESS_URL ("%s") and can not be compressed' % (url, settings.MEDIA_URL))
         basename = url[len(settings.MEDIA_URL):]

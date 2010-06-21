@@ -1,25 +1,43 @@
-import os, re
+import os
+import re
+from copy import copy
+from textwrap import dedent
+from BeautifulSoup import BeautifulSoup
 
 from django.template import Template, Context
 from django.test import TestCase
+
 from compressor import CssCompressor, JsCompressor, UncompressableFileError
 from compressor.conf import settings
-from django.conf import settings as django_settings
 
-from BeautifulSoup import BeautifulSoup
-import os
-from textwrap import dedent
-
-class CompressorTestCase(TestCase):
-
+class BaseTestCase(TestCase):
+    
+    def tearDown(self):
+        for k, v in self.old_settings.iteritems():
+            setattr(settings, k, v)
+    
     def setUp(self):
+        self.old_settings = copy(settings.__dict__)
+        self.TEST_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "testing")
+        settings.MEDIA_ROOT = os.path.join(self.TEST_DIR, 'media')
+        settings.MEDIA_URL = '/media/'
+        settings.COMPRESS_CSS_FILTERS = ['compressor.filters.css_default.CssAbsoluteFilter']
+        settings.COMPRESS_JS_FILTERS = ['compressor.filters.jsmin.JSMinFilter']
         settings.COMPRESS = True
         settings.COMPILER_FORMATS = {
             '.ccss': {
-                'binary_path': 'python ' + os.path.join(django_settings.TEST_DIR,'clevercss.py'),
+                'binary_path': 'python ' + os.path.join(self.TEST_DIR,'clevercss.py'),
                 'arguments': '*.ccss'
             },
         }
+        
+
+class CompressorTestCase(BaseTestCase):
+    
+    def setUp(self):
+        super(CompressorTestCase, self).setUp()
+        
+        
         self.ccssFile = os.path.join(settings.MEDIA_ROOT, u'css/three.css')
         self.css = dedent("""
         <link rel="stylesheet" href="/media/css/one.css" type="text/css">
@@ -33,6 +51,8 @@ class CompressorTestCase(TestCase):
         '</style>\n<style type="ccss">',
         "h1:\n  font-weight:bold",
         "</style>"))
+        self.css_hash = "1ff892c21b66"
+        self.js_hash = "3f33b9146e12"
         
         self.cssNode = CssCompressor(self.css)
 
@@ -55,7 +75,7 @@ class CompressorTestCase(TestCase):
     def test_css_compiler_exists(self):
         settings.COMPILER_FORMATS = {
             '.ccss': {
-                'binary_path': 'python ' + os.path.join(django_settings.TEST_DIR,'clevrcss.py'),
+                'binary_path': 'python ' + os.path.join(self.TEST_DIR,'clevrcss.py'),
                 'arguments': '*.ccss'
             },
         }            
@@ -109,19 +129,13 @@ class CompressorTestCase(TestCase):
         if os.path.exists(self.ccssFile):
             os.remove(self.ccssFile)
             
-    def test_cachekey(self):
-        is_cachekey = re.compile(r'\.?django_compressor\.\w{12}')
-        self.assert_(is_cachekey.match(self.cssNode.cachekey), "cachekey is returning something that doesn't look like r'django_compressor\.\w{12}'")
-        if os.path.exists(self.ccssFile):
-            os.remove(self.ccssFile)
-            
     def test_css_hash(self):
-        self.assertEqual('1ff892c21b66', self.cssNode.hash)
+        self.assertEqual(self.css_hash, self.cssNode.hash)
         if os.path.exists(self.ccssFile):
             os.remove(self.ccssFile)
             
     def test_css_return_if_on(self):
-        output = u'<link rel="stylesheet" href="/media/CACHE/css/1ff892c21b66.css" type="text/css">'
+        output = u'<link rel="stylesheet" href="/media/CACHE/css/%s.css" type="text/css">' % self.css_hash
         self.assertEqual(output.strip(), self.cssNode.output().strip())
         if os.path.exists(self.ccssFile):
             os.remove(self.ccssFile)
@@ -151,12 +165,14 @@ class CompressorTestCase(TestCase):
         self.assertEqual(self.js, self.jsNode.output())
 
     def test_js_return_if_on(self):
-        output = u'<script type="text/javascript" src="/media/CACHE/js/3f33b9146e12.js"></script>\n'
+        output = u'<script type="text/javascript" src="/media/CACHE/js/%s.js"></script>\n' % self.js_hash
         self.assertEqual(output, self.jsNode.output())
 
 
-class CssAbsolutizingTestCase(TestCase):
+class CssAbsolutizingTestCase(BaseTestCase):
+
     def setUp(self):
+        super(CssAbsolutizingTestCase, self).setUp()
         settings.COMPRESS = True
         settings.MEDIA_URL = '/media/'
         self.css = """
@@ -172,20 +188,27 @@ class CssAbsolutizingTestCase(TestCase):
         output = "p { background: url('%simages/image.gif') }" % settings.MEDIA_URL
         filter = CssAbsoluteFilter(content)
         self.assertEqual(output, filter.input(filename=filename))
+        self.assertEqual(output, filter.input(filename=filename, media_url=settings.MEDIA_URL))
+        
         settings.MEDIA_URL = 'http://media.example.com/'
         filename = os.path.join(settings.MEDIA_ROOT, 'css/url/test.css')
         output = "p { background: url('%simages/image.gif') }" % settings.MEDIA_URL
-        self.assertEqual(output, filter.input(filename=filename))
-
+        self.assertEqual(output, filter.input(filename=filename, media_url=settings.MEDIA_URL))
+        
+        settings.MEDIA_URL = 'https://media.example.com/'
+        output = "p { background: url('%simages/image.gif') }" % settings.MEDIA_URL
+        self.assertEqual(output, filter.input(filename=filename, media_url=settings.MEDIA_URL))
+        
     def test_css_hunks(self):
-        out = [u"p { background: url('/media/images/test.png'); }\np { background: url('/media/images/test.png'); }\np { background: url('/media/images/test.png'); }\np { background: url('/media/images/test.png'); }\n",
-               u"p { background: url('/media/images/test.png'); }\np { background: url('/media/images/test.png'); }\np { background: url('/media/images/test.png'); }\np { background: url('/media/images/test.png'); }\n",
+        out = [u"p { background: url('/media/images/test.png?f88906332eaa'); }\np { background: url('/media/images/test.png?f88906332eaa'); }\np { background: url('/media/images/test.png?f88906332eaa'); }\np { background: url('/media/images/test.png?f88906332eaa'); }\n", 
+               u"p { background: url('/media/images/test.png?f88906332eaa'); }\np { background: url('/media/images/test.png?f88906332eaa'); }\np { background: url('/media/images/test.png?f88906332eaa'); }\np { background: url('/media/images/test.png?f88906332eaa'); }\n"
                ]
         self.assertEqual(out, self.cssNode.hunks)
 
 
-class CssMediaTestCase(TestCase):
+class CssMediaTestCase(BaseTestCase):
     def setUp(self):
+        super(CssMediaTestCase, self).setUp()
         self.css = """
         <link rel="stylesheet" href="/media/css/one.css" type="text/css" media="screen">
         <style type="text/css" media="print">p { border:5px solid green;}</style>
@@ -194,11 +217,11 @@ class CssMediaTestCase(TestCase):
         self.cssNode = CssCompressor(self.css)
 
     def test_css_output(self):
-        out = u'@media screen {body { background:#990; }}\n@media print {p { border:5px solid green;}}\n@media all {body { color:#fff; }}'
+        out = u'body { background:#990; }\np { border:5px solid green;}\nbody { color:#fff; }'
         self.assertEqual(out, self.cssNode.combined)
 
 
-class TemplatetagTestCase(TestCase):
+class TemplatetagTestCase(BaseTestCase):
     def render(self, template_string, context_dict=None):
         """A shortcut for testing template output."""
         if context_dict is None:

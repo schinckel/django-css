@@ -10,6 +10,10 @@ from django.conf import settings as django_settings
 from django.template.loader import render_to_string
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+try:
+    from django.contrib.staticfiles import finders
+except ImportError:
+    finders = None
 
 from compressor.conf import settings
 from compressor import filters
@@ -62,6 +66,10 @@ class Compressor(object):
         raise NotImplementedError('split_contents must be defined in a subclass')
 
     def get_filename(self, url):
+        if getattr(django_settings,'STATIC_URL') and finders:
+            # if using staticfiles
+            basename = url[len(self.media_url):]
+            return finders.find(basename)
         if not url.startswith(self.media_url):
             raise UncompressableFileError('"%s" is not in COMPRESS_URL ("%s") and can not be compressed' % (url, self.media_url))
         url = os.path.realpath(url)

@@ -15,9 +15,9 @@ class CssAbsoluteFilter(FilterBase):
         media_root = os.path.abspath(settings.MEDIA_ROOT)
         if filename is not None:
             filename = os.path.abspath(filename)
-        if not filename or not filename.startswith(media_root):
+        if not filename:
             return self.content
-        self.media_path = filename[len(media_root):]
+        self.media_path = filename.split(media_url)[1]
         self.media_path = self.media_path.lstrip('/')
         self.media_url = media_url.rstrip('/')
         self.mtime = get_file_hash(filename)

@@ -10,6 +10,10 @@ from django.conf import settings as django_settings
 from django.template.loader import render_to_string
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+try:
+    from django.contrib.staticfiles import finders
+except ImportError:
+    finders = None
 
 from compressor.conf import settings
 from compressor import filters
@@ -41,13 +45,13 @@ def exe_exists(program):
 
 class Compressor(object):
 
-    def __init__(self, content, ouput_prefix="compressed", xhtml=False, media_url=settings.MEDIA_URL):
+    def __init__(self, content, ouput_prefix="compressed", xhtml=False, media_url=None):
         self.content = content
         self.ouput_prefix = ouput_prefix
         self.split_content = []
         self.soup = BeautifulSoup(self.content)
         self.xhtml = xhtml
-        self.media_url = media_url
+        self.media_url = media_url or settings.MEDIA_URL
         try:
           from django.contrib.sites.models import Site
           self.domain = Site.objects.get_current().domain
@@ -62,17 +66,16 @@ class Compressor(object):
         raise NotImplementedError('split_contents must be defined in a subclass')
 
     def get_filename(self, url):
-        from django.conf import settings as proj_settings
-        if "staticmedia" in proj_settings.INSTALLED_APPS:
-            import staticmedia
-            for prefix, path in staticmedia.get_mount_points():
-                if url.startswith(prefix):
-                    return staticmedia.path(url.replace(prefix, ''))
+        if getattr(django_settings,'STATIC_URL') and finders:
+            # if using staticfiles
+            basename = url[len(self.media_url):]
+            return finders.find(basename)
         if not url.startswith(self.media_url):
             raise UncompressableFileError('"%s" is not in COMPRESS_URL ("%s") and can not be compressed' % (url, self.media_url))
+        url = os.path.realpath(url)
         basename = url[len(self.media_url):]
         filename = os.path.join(settings.MEDIA_ROOT, basename)
-        return filename
+        return os.path.realpath(filename)
 
     @property
     def mtimes(self):
@@ -122,7 +125,10 @@ class Compressor(object):
                     content = filter(media_url=self.media_url, **kwargs)
             except NotImplementedError:
                 pass
-        return str(content)
+        if type(content) == str:
+            return content
+        else:
+            return unicode(content).encode('utf-8')
 
     @property
     def combined(self):
@@ -181,7 +187,7 @@ class Compressor(object):
 
 class CssCompressor(Compressor):
 
-    def __init__(self, content, ouput_prefix="css", xhtml=False, media_url=settings.MEDIA_URL):
+    def __init__(self, content, ouput_prefix="css", xhtml=False, media_url=None):
         self.extension = ".css"
         self.template_name = "compressor/css.html"
         self.filters = settings.COMPRESS_CSS_FILTERS
@@ -290,7 +296,7 @@ class CssCompressor(Compressor):
     
 class JsCompressor(Compressor):
 
-    def __init__(self, content, ouput_prefix="js", xhtml=False, media_url=settings.MEDIA_URL):
+    def __init__(self, content, ouput_prefix="js", xhtml=False, media_url=None):
         self.extension = ".js"
         self.template_name = "compressor/js.html"
         self.filters = settings.COMPRESS_JS_FILTERS
